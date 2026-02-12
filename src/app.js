@@ -184,6 +184,129 @@ import Hotbar from "./pages/index/hotbar.js";
 		document.getElementById('modalExemplos').style.display = 'none';
 	}
 
+	/**
+	 * Converte URL do GitHub para URL raw
+	 * Suporta: github.com/user/repo/exemplo.por ou github.com/user/repo/blob/main/exemplo.por
+	 */
+	function githubUrlToRaw(githubUrl) {
+		// Decodifica URL caso esteja encoded
+		let url = decodeURIComponent(githubUrl);
+		
+		// Remove protocol se existir
+		url = url.replace(/^https?:\/\//, '');
+		
+		// Remove www. se existir
+		url = url.replace(/^www\./, '');
+		
+		// Verifica se é uma URL do GitHub
+		if (!url.startsWith('github.com/')) {
+			throw new Error('URL inválida: deve começar com github.com/');
+		}
+		
+		// Remove github.com/
+		url = url.substring('github.com/'.length);
+		
+		// Divide em partes: user/repo/resto
+		const parts = url.split('/');
+		
+		if (parts.length < 3) {
+			throw new Error('URL do GitHub inválida: formato esperado github.com/user/repo/arquivo.por');
+		}
+		
+		const user = parts[0];
+		const repo = parts[1];
+		let filePath;
+		let branch = 'main'; // branch padrão
+		
+		// Verifica se tem /blob/ ou /raw/ no caminho
+		if (parts[2] === 'blob' || parts[2] === 'raw') {
+			// github.com/user/repo/blob/branch/path/file.por
+			branch = parts[3] || 'main';
+			filePath = parts.slice(4).join('/');
+		} else {
+			// github.com/user/repo/file.por (assume main branch)
+			filePath = parts.slice(2).join('/');
+		}
+		
+		// Se não encontrou filePath, tenta com master como fallback
+		if (!filePath) {
+			throw new Error('Caminho do arquivo não encontrado na URL');
+		}
+		
+		// Monta URL raw
+		return `https://raw.githubusercontent.com/${user}/${repo}/${branch}/${filePath}`;
+	}
+
+	/**
+	 * Carrega arquivo .por do GitHub a partir da URL
+	 */
+	export function loadFromGitHub(githubUrl, tryMaster = false) {
+		try {
+			let rawUrl = githubUrlToRaw(githubUrl);
+			
+			// Se estiver tentando com master, substitui main por master
+			if (tryMaster) {
+				rawUrl = rawUrl.replace('/main/', '/master/');
+				console.log('Tentando com branch master:', rawUrl);
+			} else {
+				console.log('Carregando arquivo do GitHub:', rawUrl);
+			}
+			
+			httpGetAsync(rawUrl,
+				function(code) {
+					editorManager.setValue(code);
+					limparErros();
+					// Fecha a modal de exemplos após carregar com sucesso
+					document.getElementById('modalExemplos').style.display = 'none';
+					console.log('Arquivo carregado com sucesso do GitHub');
+				}
+			).catch(error => {
+				console.error('Erro ao carregar arquivo do GitHub:', error);
+				
+				// Se falhou com main e ainda não tentou com master, tenta novamente
+				if (!tryMaster && rawUrl.includes('/main/')) {
+					console.log('Falhou com branch main, tentando com master...');
+					loadFromGitHub(githubUrl, true);
+				} else {
+					alert('Erro ao carregar arquivo do GitHub. Verifique se a URL está correta e o arquivo existe.\n\nURL tentada: ' + rawUrl);
+				}
+			});
+		} catch (error) {
+			console.error('Erro ao processar URL do GitHub:', error);
+			alert('URL do GitHub inválida. Use o formato: github.com/user/repo/arquivo.por\n\nExemplos:\n- github.com/user/repo/exemplo.por\n- github.com/user/repo/blob/main/exemplo.por');
+		}
+	}
+
+	/**
+	 * Verifica se há parâmetro #code na URL e carrega o arquivo
+	 */
+	function checkAndLoadFromUrl() {
+		// Verifica se há hash na URL
+		if (window.location.hash) {
+			let hash = window.location.hash.substring(1); // Remove o #
+			
+			// Decodifica a URL (caso tenha sido encoded)
+			hash = decodeURIComponent(hash);
+			
+			// Verifica se é um parâmetro code=
+			if (hash.startsWith('code=')) {
+				let githubUrl = hash.substring(5); // Remove 'code='
+				
+				// Remove possíveis espaços em branco
+				githubUrl = githubUrl.trim();
+				
+				if (githubUrl) {
+					console.log('Detectado parâmetro code na URL:', githubUrl);
+					// Fecha a modal de exemplos antes de carregar
+					document.getElementById('modalExemplos').style.display = 'none';
+					loadFromGitHub(githubUrl);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	export function toggleHotbar(show)
 	{
 		hotbarManager.toggleHotbar(show);
@@ -630,6 +753,11 @@ import Hotbar from "./pages/index/hotbar.js";
 		return "";
 	};
 
+	// Listener para mudanças no hash da URL
+	window.addEventListener('hashchange', function() {
+		checkAndLoadFromUrl();
+	}, false);
+
 	if (document.addEventListener)
 	{
 		//window.addEventListener("resize", hideHotBarWhenLandscape);
@@ -651,7 +779,11 @@ import Hotbar from "./pages/index/hotbar.js";
 		if(last_code)
 			editorManager.setValue(last_code);
 	}
-	setEditorFromAutoSave();
+
+	// Primeiro tenta carregar da URL, senão carrega do autosave
+	if (!checkAndLoadFromUrl()) {
+		setEditorFromAutoSave();
+	}
 
 	hotbarManager.resizeEditorToFitHotbar();
 	if(isMobile)
