@@ -1563,26 +1563,30 @@ export class Compiler {
 					{
 						//console.log("Marcou como unsafe porque chamou a função leia");
 						this.funcScopeRef.jsSafe = false;
-						let methName= expr.name;
-						if(args.length == 1)
+						if(args.length == 0)
 						{
-							let v = this.getVar(args[0].name);
+							this.erro("o leia deve receber pelo menos uma variável como argumento");
+							return T_vazio;
+						}
+						
+						// Processa cada variável passada ao leia
+						for(let argIdx = 0; argIdx < args.length; argIdx++)
+						{
+							let methName = "leia";
+							let v = this.getVar(args[argIdx].name);
+							
 							if(v.isArray)
 								methName += "$"+getTypeWord(v.arrayType);
 							else
 								methName += "$"+getTypeWord(v.type);
 
-							this.compileExpr(args[0],bc,-1);
+							this.compileExpr(args[argIdx],bc,-1);
 							bc.push(B_INVOKE);
 							let funcIndex = this.getFuncIndex(methName,[]);
 							bc.push(funcIndex);
-							bc.push(args.length);
+							bc.push(1); // uma variável por vez
 							
-							this.compileMemberAttrib(args[0],v,bc);
-						}
-						else
-						{
-							this.erro("o leia deve receber uma variável como argumento");
+							this.compileMemberAttrib(args[argIdx],v,bc);
 						}
 						return T_vazio;
 					}

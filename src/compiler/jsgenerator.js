@@ -1,6 +1,6 @@
 import { STATEMENT_block, STATEMENT_caso, STATEMENT_declArr, STATEMENT_declArrValues, STATEMENT_declVar, STATEMENT_enquanto, STATEMENT_escolha, STATEMENT_expr, STATEMENT_facaEnquanto, STATEMENT_para, STATEMENT_pare, STATEMENT_ret, STATEMENT_se 
 } from "./parser.js";
-import { T_parO, T_word, T_inteiro, T_cadeia, T_caracter, T_real, T_logico, T_vazio, T_Minteiro, T_Vetor, T_Matriz, T_Vinteiro, T_Vcaracter, T_Vcadeia, T_Vreal, T_Vlogico, T_Mcaracter, T_Mcadeia, T_Mreal, T_Mlogico, convertArrayDimsType, convertArrayType, convertMatrixType, T_attrib, isOperator, getOpPrecedence, T_and, T_or, T_ge, T_gt, T_le, T_lt, T_equals, T_notequals, isAttribOp, getSeparator, T_div, T_attrib_div, T_not, T_unary_plus, T_unary_minus, T_autoinc, T_pre_autoinc, T_autodec, T_pre_autodec, T_bitnot, T_inteiroLiteral, T_realLiteral, T_cadeiaLiteral, T_caracterLiteral, stringEscapeSpecials, T_logicoLiteral, T_squareO, T_dot 
+import { T_parO, T_word, T_inteiro, T_cadeia, T_caracter, T_real, T_logico, T_vazio, T_Minteiro, T_Vetor, T_Matriz, T_Vinteiro, T_Vcaracter, T_Vcadeia, T_Vreal, T_Vlogico, T_Mcaracter, T_Mcadeia, T_Mreal, T_Mlogico, convertArrayDimsType, convertArrayType, convertMatrixType, T_attrib, isOperator, getOpPrecedence, T_and, T_or, T_ge, T_gt, T_le, T_lt, T_equals, T_notequals, isAttribOp, getSeparator, T_div, T_attrib_div, T_not, T_unary_plus, T_unary_minus, T_autoinc, T_pre_autoinc, T_autodec, T_pre_autodec, T_bitnot, T_inteiroLiteral, T_realLiteral, T_cadeiaLiteral, T_caracterLiteral, stringEscapeSpecials, T_logicoLiteral, T_squareO, T_dot, getTypeWord
 } from "./tokenizer.js";
 import { escreva, leia, limpa, recursiveDeclareArray, sorteia, VM_f2s, VM_i2s, VM_realbool2s, VM_getGlobals
 } from "./vm/vm.js";
@@ -242,6 +242,39 @@ export default class JsGenerator {
 		window["VM_realbool2s"] = VM_realbool2s;
 		window["VM_libraries"] = this.libraries;
 		window["VM_globals"] = VM_getGlobals;
+		
+		// Criar funções wrapper para leia com conversão de tipo
+		window["JS_leia$inteiro"] = function() {
+			let input = leia();
+			if(!input || 0 === input.length) throw "Deve inserir um número inteiro";
+			if(!/^[\+\-]?\d+$/.test(input)) throw "Deve inserir um número inteiro";
+			return parseInt(input);
+		};
+		
+		window["JS_leia$real"] = function() {
+			let input = leia();
+			if(!input || 0 === input.length) throw "Deve inserir um número";
+			let num = parseFloat(input);
+			if(isNaN(num) || !isFinite(num)) throw "Deve inserir um número";
+			return num;
+		};
+		
+		window["JS_leia$cadeia"] = function() {
+			return leia();
+		};
+		
+		window["JS_leia$caracter"] = function() {
+			let input = leia();
+			if(!input || 0 === input.length) throw "Deve inserir um caractere";
+			return input[0];
+		};
+		
+		window["JS_leia$logico"] = function() {
+			let input = leia();
+			if(input === "verdadeiro") return true;
+			if(input === "falso") return false;
+			throw "Deve inserir verdadeiro ou falso";
+		};
 		
 		// Gerar as variáveis globais?
 		let funcInit = {name:"#globalInit",overloaded:true,overloadedName:"globalInit" };
@@ -850,7 +883,25 @@ export default class JsGenerator {
 					}
 					else if(methName == "leia")
 					{
-						funcPars = [-1];
+						// Para leia com múltiplas variáveis, gera múltiplas chamadas
+						for(let i = 0; i < args.length; i++)
+						{
+							let v = this.getVar(args[i].name);
+							let leiaName = "leia$";
+							
+							if(v.isArray)
+								leiaName += getTypeWord(v.arrayType);
+							else
+								leiaName += getTypeWord(v.type);
+							
+							leiaName = this.globalPrefix + leiaName;
+							
+							this.gen(args[i].name + " = " + leiaName + "()");
+							if(i < args.length - 1)
+								this.gen("; ");
+						}
+						retType = T_vazio;
+						break; // Sai do bloco T_parO porque já gerou o código
 					}
 					else
 					{
