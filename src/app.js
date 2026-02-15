@@ -77,14 +77,18 @@ import Hotbar from "./pages/index/hotbar.js";
 			// abrir hotbar e animar
 			hotbarManager.extendUntil("EXTENDED");
 
-			// realçar linha?
+			// Limpa erros anteriores
 			limparErros();
-			realcarLinha(editorManager.getValue(),getCurrentTokenIndex(),true);
-
-			portugolRun.executar_step();
 			
-
-			gerarTabelaVariaveis();
+			// Usa requestAnimationFrame para sincronizar realce com rendering
+			// Evita race condition que causava não realçar a linha em Opera/IE
+			requestAnimationFrame(() => {
+				realcarLinha(editorManager.getValue(),getCurrentTokenIndex(),true);
+				
+				portugolRun.executar_step();
+				
+				gerarTabelaVariaveis();
+			});
 
 			return;
 		} else {
