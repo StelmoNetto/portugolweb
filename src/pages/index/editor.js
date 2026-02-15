@@ -212,24 +212,34 @@ export default class EditorManager {
     }
 
     highlight(linha,coluna,colunaFim,scrollTo) {
-        this.errosAnnot.push({
-			row: linha-1,
-			column: coluna,
-			text: "", // Or the Json reply from the parser 
-			type: "information" // also warning and information
-		});
-		this.editor.getSession().setAnnotations(this.errosAnnot);
-		
-		this.errosMarkers.push(
-            this.editor.getSession()
+        // DEBUG: Log para diagnosticar problemas de realce em navegadores diferentes
+        if(typeof console !== 'undefined') {
+            console.debug("[Ace] Realçando linha:", linha, "Col:", coluna, "-", colunaFim, "Scroll:", scrollTo);
+        }
+        
+        // Nota: Removemos a anotação "information" que causava conflitos visuais
+        // com o marker de realce em diferentes navegadores (especialente Opera e IE)
+        
+        // Adiciona o marker para realçar a linha
+		let markerId = this.editor.getSession()
             .addMarker(
                 new Range(linha-1, 0, linha-1, colunaFim), 
                 'ace_realceportugol-marker', 'screenLine'
-        ));
+        );
+		this.errosMarkers.push(markerId);
 		
 		if(scrollTo)
 		{
-			this.editor.scrollToLine(linha, true, true, function () {});
+			// Scroll com callback que força atualização de rendering
+			// Evita bug onde a linha não aparece realçada em Opera/IE
+			this.editor.scrollToLine(linha-1, true, true, () => {
+				// Aguarda um frame e força update da viewport
+				if(typeof requestAnimationFrame !== 'undefined') {
+					requestAnimationFrame(() => {
+						this.editor.renderer.updateFull(false);
+					});
+				}
+			});
 		}
     }
 

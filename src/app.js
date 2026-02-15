@@ -77,14 +77,18 @@ import Hotbar from "./pages/index/hotbar.js";
 			// abrir hotbar e animar
 			hotbarManager.extendUntil("EXTENDED");
 
-			// realçar linha?
+			// Limpa erros anteriores
 			limparErros();
-			realcarLinha(editorManager.getValue(),getCurrentTokenIndex(),true);
-
-			portugolRun.executar_step();
 			
-
-			gerarTabelaVariaveis();
+			// Usa requestAnimationFrame para sincronizar realce com rendering
+			// Evita race condition que causava não realçar a linha em Opera/IE
+			requestAnimationFrame(() => {
+				realcarLinha(editorManager.getValue(),getCurrentTokenIndex(),true);
+				
+				portugolRun.executar_step();
+				
+				gerarTabelaVariaveis();
+			});
 
 			return;
 		} else {
@@ -542,10 +546,23 @@ import Hotbar from "./pages/index/hotbar.js";
 	function realcarLinha(textInput,index,scrollTo)
 	{
 		let linha = numberOfLinesUntil(index,textInput);
-		let prev_line = textInput.substring(textInput.lastIndexOf('\n', index)+1,index).replace(/\t/g,'    ');
+		let prev_line = textInput.substring(textInput.lastIndexOf('\n', index)+1,index);
 		let next_line = textInput.substring(index,textInput.indexOf('\n', index));
-		let coluna = prev_line.length;
-		let colunaFim = coluna+next_line.length;
+		
+		// Calcula coluna considerando tabs corretamente
+		// O Ace Editor usa useSoftTabs: false, então tabs são tabs de verdade
+		let coluna = 0;
+		for(let i = 0; i < prev_line.length; i++) {
+			if(prev_line[i] === '\t') {
+				// Tab = avança até o próximo "tab stop" (normalmente colós 4, 8, 12, ...)
+				coluna += 4 - (coluna % 4);
+			} else {
+				coluna++;
+			}
+		}
+		
+		// Para colunaFim, apenas soma o tamanho da próxima linha
+		let colunaFim = coluna + next_line.length;
 		
 		editorManager.highlight(linha,coluna,colunaFim,scrollTo);
 	}
