@@ -230,8 +230,8 @@ white-space: pre-wrap;
 div.saida {
 	white-space: pre;
 	font-weight: 450;
-	color: #C0C0C0;
-	background: #000000;
+	color: #000000;
+	background: #FFFFFF;
 	font-family:Liberation Mono, Courier New, Consolas,Monaco,Lucida Console,DejaVu Sans Mono,Bitstream Vera Sans Mono, monospace;
 	/*font-family: "Courier New", Courier, monospace;*/
 	tab-size: 4;
@@ -343,4 +343,10 @@ div.portugol-buttons input, #myCanvasModal input, .ModalContent input, .listaExe
 h1 {
 	color: maroon;
 	margin-left: 40px;
+}
+
+/* Dark theme variant for output */
+div.saida.dark-theme {
+	color: #C0C0C0;
+	background: #000000;
 }

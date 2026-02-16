@@ -328,6 +328,21 @@ import Hotbar from "./pages/index/hotbar.js";
 		editorManager.setAutoCompleterState(checked);
 	}
 
+	export function setDarkTheme(checked)
+	{
+		editorManager.setDarkTheme(checked);
+		
+		// Toggle dark theme class on output divs
+		const saidaElements = document.querySelectorAll('.saida');
+		saidaElements.forEach(element => {
+			if(checked) {
+				element.classList.add('dark-theme');
+			} else {
+				element.classList.remove('dark-theme');
+			}
+		});
+	}
+
 	export function executarStepStart(btn)
 	{
 		//onmousedown="this.className = 'clicou';executar(document.getElementById('btn-run'),true);this.className = 'segurando';" onmouseup="executarStepPause();this.className = '';"

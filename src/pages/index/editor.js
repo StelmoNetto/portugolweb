@@ -28,7 +28,7 @@ export default class EditorManager {
         }
         );
         //console.log(ace);
-        this.editor.setTheme("ace/theme/portugol_dark");
+        this.editor.setTheme("ace/theme/textmate");
         this.editor.session.setMode("ace/mode/portugol");
 
         this.editor.setOptions({
@@ -72,6 +72,12 @@ export default class EditorManager {
             enableBasicAutocompletion: checked, 
             enableLiveAutocompletion: checked 
         });
+	}
+
+    setDarkTheme(isDark)
+	{
+		const theme = isDark ? "ace/theme/portugol_dark" : "ace/theme/textmate";
+		this.editor.setTheme(theme);
 	}
 
     getValue() {
