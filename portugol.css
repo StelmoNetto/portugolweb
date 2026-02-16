@@ -186,7 +186,8 @@ body.mobile .mobileHidden{
     table-layout: fixed;
 
 	border-collapse: collapse;
-	background-color: #000000;
+	background-color: #FFFFFF;
+	color: #000000;
 }
 
 .tabelavariaveis td,.tabelavariaveis th {
@@ -203,6 +204,17 @@ body.mobile .mobileHidden{
 
 .tabelavariaveis th {
 	padding: 10px;
+}
+
+/* Dark theme variant for table */
+.tabelavariaveis.dark-theme {
+	background-color: #000000;
+	color: #C0C0C0;
+}
+
+.tabelavariaveis.dark-theme td,
+.tabelavariaveis.dark-theme th {
+	border-color: #666;
 }
 
 .atecemporcento {

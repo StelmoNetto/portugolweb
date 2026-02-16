@@ -341,6 +341,16 @@ import Hotbar from "./pages/index/hotbar.js";
 				element.classList.remove('dark-theme');
 			}
 		});
+		
+		// Toggle dark theme class on table
+		const tabelaElement = document.querySelector('.tabelavariaveis');
+		if(tabelaElement) {
+			if(checked) {
+				tabelaElement.classList.add('dark-theme');
+			} else {
+				tabelaElement.classList.remove('dark-theme');
+			}
+		}
 	}
 
 	export function executarStepStart(btn)
