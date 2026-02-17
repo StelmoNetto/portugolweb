@@ -46,7 +46,9 @@ import Hotbar from "./pages/index/hotbar.js";
 			return;
 		}
 
-		let txt = "<div class='atecemporcento'><table class='tabelavariaveis'><thead><tr><th>Variaveis</th></tr></thead><tbody>";
+		let isDark = document.getElementById("check-tema-escuro").checked;
+
+		let txt = isDark ? "<div class='atecemporcento'><table class='tabelavariaveis dark-theme'><thead><tr><th>Variaveis</th></tr></thead><tbody>" : "<div class='atecemporcento'><table class='tabelavariaveis'><thead><tr><th>Variaveis</th></tr></thead><tbody>";
 		for(const v of tabela) {
 			let vtxt = "";
 
