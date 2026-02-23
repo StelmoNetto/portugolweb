@@ -52,10 +52,7 @@ export default class EditorManager {
             }
         });
 
-        if(isMobile)
-        {
-            this.editor.renderer.setShowGutter(false);
-        }
+        // Gutter permanece visível para permitir breakpoints no editor
 
         this.editor.on("focus", editorFocusCallback);
         this.editor.focus();

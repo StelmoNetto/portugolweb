@@ -1,6 +1,49 @@
 import { numberOfLinesUntil } from "../../extras/extras.js";
 import { convertArrayToSimpleType, isArrayOrMatrixType, T_cadeia, T_caracter, T_inteiro, T_logico, T_real, T_Vcadeia, T_Vcaracter, T_Vinteiro, T_Vlogico, T_Vreal } from "../tokenizer.js";
 
+// Deep copy struct while preserving const field properties
+function deepCopyStruct(obj)
+{
+	if(!obj || typeof obj !== 'object') return obj;
+
+	let copy = {__struct__: true};
+
+	// Get all property descriptors to preserve const fields
+	let props = Object.getOwnPropertyNames(obj);
+	for(let prop of props)
+	{
+		if(prop === '__struct__') continue;
+
+		let descriptor = Object.getOwnPropertyDescriptor(obj, prop);
+		let value = deepCopyValue(obj[prop]);
+
+		// Preserve property descriptor (writable, enumerable, etc)
+		Object.defineProperty(copy, prop, {
+			value: value,
+			writable: descriptor.writable,
+			enumerable: descriptor.enumerable,
+			configurable: descriptor.configurable
+		});
+	}
+
+	return copy;
+}
+
+function deepCopyValue(value)
+{
+	if(Array.isArray(value))
+	{
+		return value.map((item) => deepCopyValue(item));
+	}
+
+	if(value && typeof value === 'object' && value.__struct__)
+	{
+		return deepCopyStruct(value);
+	}
+
+	return value;
+}
+
 export const B_TRUE = 0;
 export const B_FALSE = 1;
 
@@ -234,6 +277,7 @@ export const STATE_DELAY = 5;
 export const STATE_DELAY_REPEAT = 6;
 export const STATE_STEP = 7;
 export const STATE_ASYNC_RETURN = 8;
+export const STATE_PAUSED_AT_BREAKPOINT = 9;
 
 // deveria fazer a execução da vm não ser global?
 
@@ -251,6 +295,17 @@ export function VM_setExecJS(v) {
 }
 export function VM_getExecJS() {
 	return VM_execJS;
+}
+
+let VM_breakpoints = new Set();
+let VM_lastBreakpointLine = -1;
+
+export function VM_setBreakpoints(breakpointSet) {
+	VM_breakpoints = breakpointSet;
+	VM_lastBreakpointLine = -1;
+}
+export function VM_getBreakpoints() {
+	return VM_breakpoints;
 }
 // frame locals
 let VM_code = false;
@@ -540,6 +595,7 @@ export function VMsetup(functions,jsfunctions,libraries,scopeList,globalCount,te
 	VM_saidaDiv = saida_div;
 	
 	VM_escrevaCount = 0;
+	VM_lastBreakpointLine = -1;
 	// para resetar a div e talz
 	limpa();
 	
@@ -595,20 +651,56 @@ export function VMrun(execMax)
 				VM_stack[VM_si-2] = v;
 			}
 			break;
-			case B_STORE: VM_vars[VM_code[VM_i++]] = VM_stack[--VM_si]; break;
+			case B_STORE: 
+			{
+				let value = VM_stack[--VM_si];
+				// Deep copy struct when storing to ensure independent copies
+				if(value && typeof value === 'object' && value.__struct__)
+				{
+					value = deepCopyStruct(value);
+				}
+				VM_vars[VM_code[VM_i++]] = value; 
+			}
+			break;
 			case B_LOAD: VM_stack[VM_si++] = VM_vars[VM_code[VM_i++]]; break;
 			
-			case B_STOREGLOBAL: VM_globals[VM_code[VM_i++]] = VM_stack[--VM_si]; break;
+			case B_STOREGLOBAL: 
+			{
+				let value = VM_stack[--VM_si];
+				// Deep copy struct when storing to ensure independent copies
+				if(value && typeof value === 'object' && value.__struct__)
+				{
+					value = deepCopyStruct(value);
+				}
+				VM_globals[VM_code[VM_i++]] = value;
+			}
+			break;
 			case B_LOADGLOBAL: VM_stack[VM_si++] = VM_globals[VM_code[VM_i++]]; break;
 			
 			case B_LIBLOAD: 
 			{
 				let lib = VM_code[VM_i++];
 				let field = VM_code[VM_i++];
+			
+			// Handle struct field access
+			if(lib === "__struct__")
+			{
+				let structObj = VM_stack[--VM_si];  // Pop struct object from stack
+				if(structObj && typeof structObj === 'object')
+				{
+					VM_stack[VM_si++] = structObj[field];
+				}
+				else
+				{
+					VM_stack[VM_si++] = undefined;
+				}
+			}
+			else
+			{
 				VM_stack[VM_si++] = VM_libraries[lib][field];
 			}
+			}
 			break;
-
 			case B_ADD: VM_stack[VM_si-2] = VM_stack[VM_si-2]+VM_stack[VM_si-1]; VM_si--; break;
 			case B_SUB: VM_stack[VM_si-2] = VM_stack[VM_si-2]-VM_stack[VM_si-1]; VM_si--; break;
 			case B_MUL: VM_stack[VM_si-2] = VM_stack[VM_si-2]*VM_stack[VM_si-1]; VM_si--; break;
@@ -651,9 +743,31 @@ export function VMrun(execMax)
 				}
 				methArgs.reverse();
 				
+				// Handle struct field assignment
+				if(lib === "__struct__" && meth === "__set__")
+				{
+					// methArgs = [struct, fieldname, value]
+					let structObj = methArgs[0];
+					let fieldName = methArgs[1];
+					let value = methArgs[2];
+					
+					if(structObj && typeof structObj === 'object')
+					{
+						let descriptor = Object.getOwnPropertyDescriptor(structObj, fieldName);
+						if(!(descriptor && descriptor.writable === false))
+						{
+							if(value && typeof value === 'object' && value.__struct__)
+							{
+								value = deepCopyStruct(value);
+							}
+							structObj[fieldName] = value;
+						}
+					}
+					// No return value for assignment, continue to next instruction
+					break;
+				}
+				
 				let ret = VM_libraries[lib][meth].apply(VM_libraries[lib], methArgs);
-				
-				
 				if(ret)
 				{
 					let retValue = ret.value;
@@ -666,15 +780,15 @@ export function VMrun(execMax)
 						}
 						VM_stack[VM_si++] = retValue;
 					}
-					
+
 					if(typeof ret.state !== "undefined" && ret.state != STATE_RUNNING)
 					{
-						if(ret.state == STATE_DELAY_REPEAT) // não pode retornar esse estado e um valor ao mesmo tempo, daria comportamento inconsistente
+						if(ret.state == STATE_DELAY_REPEAT)
 						{
 							VM_i = lastVM_i;
 							VM_si = lastVM_si;
 						}
-						
+
 						return ret.state;
 					}
 				}
@@ -722,7 +836,17 @@ export function VMrun(execMax)
 					VM_vars = new Array(VM_functions[VM_funcIndex].varCount);
 					if(methArgs) for(let i=0;i<methArgs.length;i++)
 					{
-						VM_vars[i] = methArgs[i];
+						// For by-copy parameters (not by-ref), make a deep copy of struct arguments
+						let arg = methArgs[i];
+						let param = VM_functions[methIndex].parameters && VM_functions[methIndex].parameters[i];
+						
+						if(param && !param.byRef && arg && typeof arg === 'object' && arg.__struct__)
+						{
+							// Deep copy struct for by-value parameter, preserving const fields
+							arg = deepCopyStruct(arg);
+						}
+						
+						VM_vars[i] = arg;
 					}
 				}
 				else
@@ -781,6 +905,10 @@ export function VMrun(execMax)
 			case B_RETVALUE: // return <expr>; // com valor
 			{
 				let v = VM_stack[--VM_si];
+				if(v && typeof v === 'object' && v.__struct__)
+				{
+					v = deepCopyStruct(v);
+				}
 				if(VM_frame.length > 0)
 				{
 					let vI = VM_frame.length -1;
@@ -853,28 +981,58 @@ export function VMrun(execMax)
 			{
 				let arrayVar = VM_code[VM_i++];
 				let ndims = VM_code[VM_i++];
-				
 				let indexes = [];
-				for(let k=0;k<ndims;k++)
+				let value;
+				let tempArr;
+
+				// arrayVar == -1 uses array reference from stack with layout: [arrayRef, indexes..., value]
+				if(arrayVar == -1)
 				{
-					indexes.push(VM_stack[--VM_si]);
-				}
-				indexes.reverse();
-				
-				let tempArr = code == B_ASTOREGLOBAL ? VM_globals[arrayVar] :VM_vars[arrayVar];
-				for(let k=0;k<ndims-1;k++)
-				{
-					if(indexes[k]>=0 && indexes[k] < tempArr.length)
-						tempArr = tempArr[indexes[k]];
-					else
+					value = VM_stack[--VM_si];
+					for(let k=0;k<ndims;k++)
 					{
-						VMerro("a matriz tem tamanho '"+tempArr.length+"' na dimensão '"+k+"' mas tentou acessar a posição '"+indexes[k]+"'");
-						return STATE_ENDED;
+						indexes.push(VM_stack[--VM_si]);
 					}
+					indexes.reverse();
+					tempArr = VM_stack[--VM_si];
 				}
+				// normal arrays use layout: [value, indexes...]
+				else
+				{
+					for(let k=0;k<ndims;k++)
+					{
+						indexes.push(VM_stack[--VM_si]);
+					}
+					indexes.reverse();
+					tempArr = code == B_ASTOREGLOBAL ? VM_globals[arrayVar] : VM_vars[arrayVar];
+					value = VM_stack[--VM_si];
+				}
+
+				if(value && typeof value === 'object' && value.__struct__)
+				{
+					value = deepCopyStruct(value);
+				}
+				
+			// Safety check: ensure tempArr is actually an array
+			if(!tempArr || !Array.isArray(tempArr))
+			{
+				VMerro("tentativa de atribuir elemento de um não-array");
+				return STATE_ENDED;
+			}
+			
+			for(let k=0;k<ndims-1;k++)
+			{
+				if(indexes[k]>=0 && indexes[k] < tempArr.length)
+					tempArr = tempArr[indexes[k]];
+				else
+				{
+					VMerro("a matriz tem tamanho '"+tempArr.length+"' na dimensão '"+k+"' mas tentou acessar a posição '"+indexes[k]+"'");
+					return STATE_ENDED;
+				}
+			}
 				
 				if(indexes[ndims-1]>=0 && indexes[ndims-1] < tempArr.length)
-					tempArr[indexes[ndims-1]] = VM_stack[--VM_si];
+					tempArr[indexes[ndims-1]] = value;
 				else
 				{
 					VMerro("O vetor vai de 0 à "+(tempArr.length-1)+" mas tentou acessar a posição '"+indexes[ndims-1]+"'");
@@ -895,17 +1053,35 @@ export function VMrun(execMax)
 				}
 				indexes.reverse();
 				
-				let tempArr = code == B_ALOADGLOBAL ? VM_globals[arrayVar] :VM_vars[arrayVar];
-				for(let k=0;k<ndims-1;k++)
+				let tempArr;
+				
+				// Check if arrayVar is -1, meaning the array is on the stack
+				if(arrayVar == -1)
 				{
-					if(indexes[k]>=0 && indexes[k] < tempArr.length)
-						tempArr = tempArr[indexes[k]];
-					else
-					{
-						VMerro("a matriz tem tamanho '"+tempArr.length+"' na dimensão '"+k+"' mas tentou acessar a posição '"+indexes[k]+"'");
-						return STATE_ENDED;
-					}
+					tempArr = VM_stack[--VM_si]; // Pop the array reference from stack
 				}
+				else
+				{
+					tempArr = code == B_ALOADGLOBAL ? VM_globals[arrayVar] : VM_vars[arrayVar];
+				}
+				
+			// Safety check: ensure tempArr is actually an array
+			if(!tempArr || !Array.isArray(tempArr))
+			{
+				VMerro("tentativa de acessar elemento de um não-array");
+				return STATE_ENDED;
+			}
+			
+			for(let k=0;k<ndims-1;k++)
+			{
+				if(indexes[k]>=0 && indexes[k] < tempArr.length)
+					tempArr = tempArr[indexes[k]];
+				else
+				{
+					VMerro("a matriz tem tamanho '"+tempArr.length+"' na dimensão '"+k+"' mas tentou acessar a posição '"+indexes[k]+"'");
+					return STATE_ENDED;
+				}
+			}
 				
 				if(indexes[ndims-1]>=0 && indexes[ndims-1] < tempArr.length)
 					VM_stack[VM_si++] = tempArr[indexes[ndims-1]];
@@ -994,6 +1170,17 @@ export function VMrun(execMax)
 			default:
 				VMerro("invalid bytecode:"+code);
 				return STATE_ENDED;
+		}
+
+		if(VM_breakpoints && VM_breakpoints.size > 0)
+		{
+			let currentTokenIndex = getCurrentTokenIndex();
+			let currentLineNumber = numberOfLinesUntil(currentTokenIndex, VM_textInput);
+			if(VM_breakpoints.has(currentLineNumber) && currentLineNumber !== VM_lastBreakpointLine)
+			{
+				VM_lastBreakpointLine = currentLineNumber;
+				return STATE_PAUSED_AT_BREAKPOINT;
+			}
 		}
 	}
 	}
