@@ -22,7 +22,7 @@ let JavaHighlightRules = function() {
     "char|final|interface|static|void|" +
     "class|finally|long|strictfp|volatile|" +
     "const|float|native|super|while|" +
-    "var"
+    "var|estrutura"
     );
 
     let buildinConstants = ("null|Infinity|NaN|undefined");

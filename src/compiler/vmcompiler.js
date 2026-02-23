@@ -1,12 +1,170 @@
 import { B_ADD, B_ALOAD, B_ALOADGLOBAL, B_AND, B_ASTORE, B_ASTOREGLOBAL, B_B2S, B_CLEAR, B_DIV, B_DUP, B_F2I, B_F2S, B_FALSE, B_GOTO, B_I2S, B_iDIV, B_IFCMPEQ, B_IFCMPGE, B_IFCMPGT, B_IFCMPLE, B_IFCMPLT, B_IFCMPNE, B_IFEQ, B_IFNE, B_INVOKE, B_LIBINVOKE, B_LIBLOAD, B_LOAD, B_LOADGLOBAL, B_MUL, B_NEG, B_NEWARRAY, B_NEWARRAYGLOBAL, B_NO, B_NOT, B_OR, B_POP, B_PUSH, B_READ_BOOL, B_READ_CHAR, B_READ_FLOAT, B_READ_INT, B_READ_STRING, B_REM, B_RET, B_RETVALUE, B_SHL, B_SHR, B_STORE, B_STOREGLOBAL, B_SUB, B_SWAP, B_TRUE, B_WAITINPUT, B_WRITE, B_XOR 
 } from "./vm/vm.js";
-import { STATEMENT_block, STATEMENT_caso, STATEMENT_declArr, STATEMENT_declArrValues, STATEMENT_declVar, STATEMENT_enquanto, STATEMENT_escolha, STATEMENT_expr, STATEMENT_facaEnquanto, STATEMENT_para, STATEMENT_pare, STATEMENT_ret, STATEMENT_se 
+import { STATEMENT_block, STATEMENT_caso, STATEMENT_declArr, STATEMENT_declArrValues, STATEMENT_declStructValues, STATEMENT_declVar, STATEMENT_enquanto, STATEMENT_escolha, STATEMENT_expr, STATEMENT_facaEnquanto, STATEMENT_para, STATEMENT_pare, STATEMENT_ret, STATEMENT_se 
 } from "./parser.js";
-import { convertArrayType, convertMatrixType, getSeparator, getTypeWord, isAttribOp, T_and, T_attrib, T_attrib_bitand, T_attrib_bitnot, T_attrib_bitor, T_attrib_div, T_attrib_minus, T_attrib_mul, T_attrib_plus, T_attrib_rem, T_attrib_shiftleft, T_attrib_shiftright, T_attrib_xor, T_autodec, T_autoinc, T_bitand, T_bitnot, T_bitor, T_cadeia, T_cadeiaLiteral, T_caracter, T_caracterLiteral, T_div, T_dot, T_equals, T_ge, T_gt, T_inteiro, T_inteiroLiteral, T_le, T_logico, T_logicoLiteral, T_lt, T_Matriz, T_Minteiro, T_minus, T_Mlogico, T_mul, T_not, T_notequals, T_or, T_parO, T_plus, T_pre_autodec, T_pre_autoinc, T_real, T_realLiteral, T_rem, T_shiftleft, T_shiftright, T_squareO, T_unary_minus, T_unary_plus, T_vazio, T_Vetor, T_Vinteiro, T_Vlogico, T_word, T_xor 
+import { convertArrayType, convertMatrixType, convertArrayToSimpleType, getSeparator, getTypeWord, isAttribOp, T_and, T_attrib, T_attrib_bitand, T_attrib_bitnot, T_attrib_bitor, T_attrib_div, T_attrib_minus, T_attrib_mul, T_attrib_plus, T_attrib_rem, T_attrib_shiftleft, T_attrib_shiftright, T_attrib_xor, T_autodec, T_autoinc, T_bitand, T_bitnot, T_bitor, T_cadeia, T_cadeiaLiteral, T_caracter, T_caracterLiteral, T_div, T_dot, T_equals, T_ge, T_gt, T_inteiro, T_inteiroLiteral, T_le, T_logico, T_logicoLiteral, T_lt, T_Matriz, T_Minteiro, T_minus, T_Mlogico, T_mul, T_not, T_notequals, T_or, T_parO, T_plus, T_pre_autodec, T_pre_autoinc, T_real, T_realLiteral, T_rem, T_shiftleft, T_shiftright, T_squareO, T_unary_minus, T_unary_plus, T_vazio, T_Vetor, T_Vinteiro, T_Vlogico, T_word, T_xor 
 } from "./tokenizer.js";
 
-export function getDefaultValue(code,global)
+// Simple constant expression evaluator for struct field initialization
+function evalConstExpr(expr, structObj, constResolver)
 {
+	if(!expr) return undefined;
+	
+	// Handle literal values based on token type (op property)
+	if(expr.op == T_inteiroLiteral)
+	{
+		return parseInt(expr.value, 10);
+	}
+	else if(expr.op == T_realLiteral)
+	{
+		return parseFloat(expr.value);
+	}
+	else if(expr.op == T_cadeiaLiteral)
+	{
+		return expr.value;
+	}
+	else if(expr.op == T_caracterLiteral)
+	{
+		return expr.value;
+	}
+	else if(expr.op == T_logicoLiteral)
+	{
+		return expr.value === "verdadeiro" || expr.value === true;
+	}
+	else if(expr.op == T_word)
+	{
+		// Reference to another const field in the same struct
+		if(structObj && Object.prototype.hasOwnProperty.call(structObj, expr.name))
+		{
+			return structObj[expr.name];
+		}
+		// Reference to a global const
+		if(constResolver)
+		{
+			return constResolver(expr.name);
+		}
+	}
+	
+	// For now, only support literals in struct const fields
+	return undefined;
+}
+
+// Create array with given dimensions
+function createArray(dimensions, defaultValue)
+{
+	if(dimensions.length == 0) return defaultValue;
+	if(dimensions.length == 1)
+	{
+		let arr = [];
+		for(let i = 0; i < dimensions[0]; i++)
+		{
+			arr.push(defaultValue);
+		}
+		return arr;
+	}
+	else if(dimensions.length == 2)
+	{
+		let arr = [];
+		for(let i = 0; i < dimensions[0]; i++)
+		{
+			let row = [];
+			for(let j = 0; j < dimensions[1]; j++)
+			{
+				row.push(defaultValue);
+			}
+			arr.push(row);
+		}
+		return arr;
+	}
+	return [];
+}
+
+export function getDefaultValue(code,global,structDef,structResolver,constResolver)
+{
+	// Handle struct types
+	if(structDef)
+	{
+		let structObj = {__struct__: true};
+		for(let i = 0; i < structDef.length; i++)
+		{
+			let field = structDef[i];
+			
+			// If field has initialization expression, evaluate it
+			if(field.initExpr)
+			{
+				let value = evalConstExpr(field.initExpr, structObj, constResolver);
+				if(value !== undefined)
+				{
+					structObj[field.name] = value;
+					
+					// Mark const fields with a special property
+					if(field.isConst)
+					{
+						Object.defineProperty(structObj, field.name, {
+							value: value,
+							writable: false,
+							enumerable: true
+						});
+					}
+					continue;
+				}
+			}
+			
+			// Handle array fields
+			if(field.isArray && field.arrayDimExpr)
+			{
+				// Evaluate array dimension expressions
+				let dimensions = [];
+				for(let dimExpr of field.arrayDimExpr)
+				{
+					let dimValue = evalConstExpr(dimExpr, structObj, constResolver);
+					if(dimValue === undefined)
+					{
+						dimValue = 0; // fallback
+					}
+					dimensions.push(dimValue);
+				}
+				
+				// Get default value for array elements
+				let nestedStructDef = null;
+				if(field.structType && structResolver)
+				{
+					nestedStructDef = structResolver(field.structType);
+				}
+				let elementDefault = getDefaultValue(field.type, global, nestedStructDef, structResolver, constResolver);
+				
+				// Create array with dimensions
+				let arrayValue = createArray(dimensions, elementDefault);
+				
+				structObj[field.name] = arrayValue;
+				continue;
+			}
+			
+			// Default value for non-array fields
+			let nestedStructDef = null;
+			if(field.structType && structResolver)
+			{
+				nestedStructDef = structResolver(field.structType);
+			}
+			let defaultVal = getDefaultValue(field.type, global, nestedStructDef, structResolver, constResolver);
+			
+			// Mark const fields as non-writable
+			if(field.isConst)
+			{
+				Object.defineProperty(structObj, field.name, {
+					value: defaultVal,
+					writable: false,
+					enumerable: true
+				});
+			}
+			else
+			{
+				structObj[field.name] = defaultVal;
+			}
+		}
+		return structObj;
+	}
+	
 	switch(code)
 	{
 		case T_inteiro: return 0;
@@ -29,6 +187,40 @@ export function getDefaultValue(code,global)
 
 export function checarCompatibilidadeTipo(tA,tB,op)
 {
+	// Handle struct types (token objects)
+	if(typeof tA === 'object' && tA !== null && typeof tB === 'object' && tB !== null)
+	{
+		// Both are struct types - compare their names
+		if(tA.txt && tB.txt)
+		{
+			return tA.txt === tB.txt;
+		}
+	}
+	
+	// Handle case where one is a struct type and other is compatible
+	if(typeof tA === 'object' && tA !== null && tA.txt)
+	{
+		// tA is a struct type, compare with tB
+		if(typeof tB === 'object' && tB !== null && tB.txt)
+		{
+			return tA.txt === tB.txt;
+		}
+		// For struct types, only exact type match is allowed
+		return false;
+	}
+	
+	if(typeof tB === 'object' && tB !== null && tB.txt)
+	{
+		// tB is a struct type, compare with tA
+		if(typeof tA === 'object' && tA !== null && tA.txt)
+		{
+			return tA.txt === tB.txt;
+		}
+		// For struct types, only exact type match is allowed
+		return false;
+	}
+	
+	// Original type compatibility checking for primitive types
 	// T_Vetor é o coringa para vetores
 	if(tA == T_Vetor)
 	{
@@ -316,6 +508,7 @@ export class Compiler {
 		this.scopeList = []; // para depois conseguir encontrar variáveis durante a execução
 		this.loopScope = false;
 		this.enviarErro = erroCallback;
+		this.estruturas = codeTree.estruturas || []; // Initialize structures from code tree
 	}
 	
 	erro(msg)
@@ -493,6 +686,27 @@ export class Compiler {
 			],type:T_inteiro,jsSafe:true
 		}
 		];
+
+		this.constValues = {};
+		const constResolver = (name) => {
+			if(Object.prototype.hasOwnProperty.call(this.constValues, name))
+			{
+				return this.constValues[name];
+			}
+			return undefined;
+		};
+		for(let i = 0; i < variaveisGlobais.length; i++)
+		{
+			let stat = variaveisGlobais[i];
+			if(stat.id == STATEMENT_declVar && stat.isConst && stat.expr)
+			{
+				let value = evalConstExpr(stat.expr, null, constResolver);
+				if(value !== undefined)
+				{
+					this.constValues[stat.name] = value;
+				}
+			}
+		}
 		
 		this.lastIndex = 0;
 		this.pushScope(this.scope,true,false); // cria um scopo para as variaveis globais
@@ -558,7 +772,7 @@ export class Compiler {
 		}
 	}
 	
-	createVar(varName,comment,type,isConst,isArray,arrayDim)
+	createVar(varName,comment,type,isConst,isArray,arrayDim,structType,structDef)
 	{
 		let v = this.scope.getVar(varName);
 		if(v)
@@ -588,7 +802,9 @@ export class Compiler {
 				isConst:isConst,
 				isArray:isArray,
 				arrayType:isArray ? type : T_vazio,
-				arrayDim:arrayDim
+				arrayDim:arrayDim,
+				structType:structType,
+				structDef:structDef
 			};
 			this.scope.createVar(varName,v);
 			return v;
@@ -606,7 +822,7 @@ export class Compiler {
 		else
 		{
 			this.erro("não encontrou a variável '"+varName+"', esqueceu de declará-la?");
-			return this.createVar(varName,false,T_cadeia,false,false);
+			return this.createVar(varName,false,T_cadeia,false,false,0);
 		}
 	}
 	
@@ -646,6 +862,145 @@ export class Compiler {
 		}
 	}
 	
+	compileDeclStruct(values,bc,v,structDef,fieldPath)
+	{
+		// Compile struct initialization values
+		// values: array of field values (expressions or arrays)
+		// structDef: struct field definitions
+		// fieldPath: array of field names for nested access
+		
+		for(let i = 0; i < values.length && i < structDef.length; i++)
+		{
+			let field = structDef[i];
+			let value = values[i];
+			
+			// Load struct variable onto stack
+			bc.push(v.global ? B_LOADGLOBAL : B_LOAD);
+			bc.push(v.index);
+			
+			// Navigate to nested field if needed
+			for(let j = 0; j < fieldPath.length; j++)
+			{
+				bc.push(B_LIBLOAD);
+				bc.push("__struct__");
+				bc.push(fieldPath[j]);
+			}
+			
+			// Push field name
+			bc.push(B_PUSH);
+			bc.push(field.name);
+			
+			// Handle different field types
+			if(field.isArray && field.arrayDim > 0)
+			{
+				// Array field - value should be an array
+				if(Array.isArray(value))
+				{
+					// Create a temporary variable for the array field to use compileDeclArray
+					let arrayVar = {
+						global: v.global,
+						index: v.index,
+						arrayType: field.type,
+						arrayDim: field.arrayDim,
+						structType: field.structType,
+						structDef: field.structDef
+					};
+					
+					// For each array element, assign through struct field access
+					this.compileDeclStructArray(value,bc,v,arrayVar,field,fieldPath,field.arrayDim,[]);
+					continue; // Skip the __set__ below since compileDeclStructArray handles assignment
+				}
+			}
+			else if(field.structType)
+			{
+				// Nested struct field - value should be an array of field values
+				if(Array.isArray(value))
+				{
+					// Don't push anything here, just recurse with extended fieldPath
+					let nestedPath = [...fieldPath, field.name];
+					this.compileDeclStruct(value,bc,v,field.structDef,nestedPath);
+					continue; // Don't do __set__ or push anything
+				}
+			}
+			else
+			{
+				// Primitive field - compile expression
+				let tExpr = this.compileExpr(value,bc,field.type);
+				this.tryConvertType(field.type,tExpr,bc);
+				
+				if(!checarCompatibilidadeTipo(field.type,tExpr,T_attrib))
+				{
+					this.erro("não pode colocar "+getTypeWord(tExpr)+" no campo '"+field.name+"' do tipo "+getTypeWord(field.type));
+				}
+			}
+			
+			// Assign value to field using __set__
+			bc.push(B_LIBINVOKE);
+			bc.push("__struct__");
+			bc.push("__set__");
+			bc.push(3); // 3 args: struct, fieldname, value
+		}
+	}
+	
+	compileDeclStructArray(values,bc,v,arrayVar,field,fieldPath,arrayDim,indexes)
+	{
+		// Compile array field initialization within a struct
+		// Array is accessed through struct field, so we push it onto stack
+		
+		for(let k = 0; k < values.length; k++)
+		{
+			if(arrayDim <= 1)
+			{
+				// Load struct variable
+				bc.push(v.global ? B_LOADGLOBAL : B_LOAD);
+				bc.push(v.index);
+				
+				// Navigate to nested struct fields if needed
+				for(let j = 0; j < fieldPath.length; j++)
+				{
+					bc.push(B_LIBLOAD);
+					bc.push("__struct__");
+					bc.push(fieldPath[j]);
+				}
+				
+				// Get the array field from the struct
+				bc.push(B_LIBLOAD);
+				bc.push("__struct__");
+				bc.push(field.name);
+				
+				// Now array reference is on stack
+				// Push all array indices
+				for(let j = 0; j < indexes.length; j++)
+				{
+					bc.push(B_PUSH);
+					bc.push(indexes[j]);
+				}
+				bc.push(B_PUSH);
+				bc.push(k);
+				
+				// Compile value expression
+				let tExpr = this.compileExpr(values[k],bc,arrayVar.arrayType);
+				this.tryConvertType(arrayVar.arrayType,tExpr,bc);
+				
+				if(!checarCompatibilidadeTipo(arrayVar.arrayType,tExpr,T_attrib))
+				{
+					this.erro("não pode colocar "+getTypeWord(tExpr)+" em um vetor do tipo "+getTypeWord(arrayVar.arrayType));
+				}
+				
+				// Store into array using -1 to indicate array is on stack
+				bc.push(v.global ? B_ASTOREGLOBAL : B_ASTORE);
+				bc.push(-1);
+				bc.push(indexes.length + 1);
+			}
+			else
+			{
+				indexes.push(k);
+				this.compileDeclStructArray(values[k],bc,v,arrayVar,field,fieldPath,arrayDim-1,indexes);
+				indexes.pop();
+			}
+		}
+	}
+	
 	compileFunctionRet(func,expr)
 	{
 		let bc = func.bytecode;
@@ -658,7 +1013,7 @@ export class Compiler {
 				this.erro("não usar esta expressão para retornar, pois ela não produz valor nenhum, arrume esta expressão.");
 			}
 			
-			if(tipoRet != func.type)
+			if(!checarCompatibilidadeTipo(func.type,tipoRet,T_attrib))
 			{
 				this.erro("não pode retornar "+getTypeWord(tipoRet)+" nesta função, ela é do tipo "+getTypeWord(func.type));
 			}
@@ -716,6 +1071,22 @@ export class Compiler {
 		let bc = func.bytecode;
 		//let variableMap = func.variableMap;
 		let bcIndex = func.bytecodeIndexes;
+		
+		// Process local struct definitions (structures defined within the function scope)
+		if(Array.isArray(statements) && Array.isArray(statements.localEstructuras))
+		{
+			// Add local structs to the available structs for resolution during statement compilation
+			for(let localStruct of statements.localEstructuras)
+			{
+				// Check if this struct definition already exists in global scope
+				let alreadyExists = this.estruturas.some(s => s.name === localStruct.name);
+				if(!alreadyExists)
+				{
+					this.estruturas.push(localStruct);
+				}
+			}
+		}
+		
 		for(let i=0;i<statements.length;i++)
 		{
 			let stat = statements[i];
@@ -727,7 +1098,7 @@ export class Compiler {
 				case STATEMENT_declArr:
 				{
 					let arrayDim = stat.size_expr.length;
-					let v = this.createVar(stat.name,stat.comment,stat.type,stat.isConst,true,arrayDim);
+					let v = this.createVar(stat.name,stat.comment,stat.type,stat.isConst,true,arrayDim,stat.structType,stat.structDef);
 					
 					let declared = 0;
 					for(let k =0;k<arrayDim;k++)
@@ -789,17 +1160,68 @@ export class Compiler {
 				break;
 				case STATEMENT_declVar:
 				{
-					let v = this.createVar(stat.name,stat.comment,stat.type,stat.isConst,false);
+					let v = this.createVar(stat.name,stat.comment,stat.type,stat.isConst,false,0,stat.structType,stat.structDef);
 					if(stat.expr)
 					{
-						let tExpr = this.compileExpr(stat.expr,bc,stat.type);
-						this.tryConvertType(v.type,tExpr,bc);
-						
-						if(!checarCompatibilidadeTipo(v.type,tExpr,T_attrib))
+						// Check if expr is a struct initialization
+						if(stat.expr.id === STATEMENT_declStructValues)
 						{
-							this.erro("não pode colocar "+getTypeWord(tExpr)+" em uma variável do tipo "+getTypeWord(v.type));
+							// Struct initialization with {...}
+							// First create default struct
+							let structResolver = (typeName) => {
+								for(let s of this.estruturas) {
+									if(s.name === typeName) return s.fields;
+								}
+								return null;
+							};
+							let constResolver = (name) => {
+								if(this.constValues && Object.prototype.hasOwnProperty.call(this.constValues, name))
+								{
+									return this.constValues[name];
+								}
+								return undefined;
+							};
+							bc.push(B_PUSH);
+							bc.push(getDefaultValue(v.type, v.global, v.structDef, structResolver, constResolver));
+							bc.push(v.global ? B_STOREGLOBAL : B_STORE);
+							bc.push(v.index);
+							
+							// Then assign each field value
+							this.compileDeclStruct(stat.expr.expr,bc,v,v.structDef,[]);
 						}
-						
+						else
+						{
+							// Regular expression assignment
+							let tExpr = this.compileExpr(stat.expr,bc,stat.type);
+							this.tryConvertType(v.type,tExpr,bc);
+							
+							if(!checarCompatibilidadeTipo(v.type,tExpr,T_attrib))
+							{
+								this.erro("não pode colocar "+getTypeWord(tExpr)+" em uma variável do tipo "+getTypeWord(v.type));
+							}
+							
+							bc.push(v.global ? B_STOREGLOBAL : B_STORE);
+							bc.push(v.index);
+						}
+					}
+					else if(v.structType && !stat.isParameter)
+					{
+						// Initialize struct variable with default values (but NOT parameters - they receive values from caller)
+						let structResolver = (typeName) => {
+							for(let s of this.estruturas) {
+								if(s.name === typeName) return s.fields;
+							}
+							return null;
+						};
+						let constResolver = (name) => {
+							if(this.constValues && Object.prototype.hasOwnProperty.call(this.constValues, name))
+							{
+								return this.constValues[name];
+							}
+							return undefined;
+						};
+						bc.push(B_PUSH);
+						bc.push(getDefaultValue(v.type, v.global, v.structDef, structResolver, constResolver));
 						bc.push(v.global ? B_STOREGLOBAL : B_STORE);
 						bc.push(v.index);
 					}
@@ -1339,6 +1761,325 @@ export class Compiler {
 			let tExprB = T_vazio;
 			if(expr.op == T_attrib)
 			{
+				// Handle struct member assignment
+				if(expr[0].op == T_dot)
+				{
+					let structVar = this.scope.getVar(expr[0].name);
+					if(structVar && structVar.structType)
+					{
+						let fieldName;
+						let isArrayAccess = false;
+						let arrayIndexExprs = null;
+						let hasChainedAccess = false;
+						let chainedAccess = null;
+						
+						if(expr[0].expr.op == T_word)
+						{
+							// Simple field assignment: struct.field = value
+							fieldName = expr[0].expr.name;
+						}
+						else if(expr[0].expr.op == T_squareO)
+						{
+							// Array field assignment: struct.field[index] = value
+							fieldName = expr[0].expr.name;
+							isArrayAccess = true;
+							arrayIndexExprs = expr[0].expr.expr;
+							
+							// Check for chained access: struct.field[index].field2[index2] = value
+							if(expr[0].expr.next)
+							{
+								hasChainedAccess = true;
+								chainedAccess = expr[0].expr.next;
+							}
+						}
+						else
+						{
+							this.erro("atribuição inválida ao membro da estrutura");
+							return T_vazio;
+						}
+						
+						// Find field definition
+						let fieldDef = null;
+						if(structVar.structDef)
+						{
+							for(let i = 0; i < structVar.structDef.length; i++)
+							{
+								if(structVar.structDef[i].name === fieldName)
+								{
+									fieldDef = structVar.structDef[i];
+									break;
+								}
+							}
+						}
+						
+						if(!fieldDef)
+						{
+							this.erro("a estrutura não tem o campo '"+fieldName+"'");
+							return tExprA;
+						}
+						
+						let targetType = fieldDef.type;
+						
+						if(isArrayAccess)
+						{
+							// Handle chained access for assignment
+							if(hasChainedAccess)
+							{
+								// For array access, determine intermediate type
+							// When the field is an array, the intermediate type is the element type
+							let intermediateType = fieldDef.type;
+							
+							// For struct arrays, fieldDef.type is already the element type (e.g., {id: T_word, txt: "Pessoa"})
+							// For primitive arrays, we need to convert (e.g., T_Vinteiro -> T_inteiro)
+							if(typeof fieldDef.type === 'number')
+							{
+								// Primitive type array
+								if(arrayIndexExprs.length == 1)
+								{
+									intermediateType = convertArrayToSimpleType(fieldDef.type);
+								}
+								else if(arrayIndexExprs.length == 2)
+								{
+									intermediateType = convertArrayToSimpleType(convertArrayToSimpleType(fieldDef.type));
+								}
+							}
+							// else: struct type - fieldDef.type is already the element type
+							
+							// Find the struct definition of intermediate type
+							let chainedStructDef = null;
+							if(intermediateType && intermediateType.id == T_word)
+							{
+								for(let k = 0; k < this.estruturas.length; k++)
+								{
+									if(this.estruturas[k].name === intermediateType.txt)
+									{
+										chainedStructDef = this.estruturas[k].fields;
+										break;
+									}
+								}
+							}
+							
+							if(!chainedStructDef)
+								{
+									this.erro("tipo intermediário não é uma estrutura válida para atribuição encadeada");
+									return T_vazio;
+								}
+								
+								// Find chained field
+								let chainedFieldName = chainedAccess.name;
+								let chainedIsArrayAccess = chainedAccess.op == T_squareO;
+								let chainedArrayIndexExprs = chainedIsArrayAccess ? chainedAccess.expr : null;
+								
+								let chainedFieldDef = null;
+								for(let i = 0; i < chainedStructDef.length; i++)
+								{
+									if(chainedStructDef[i].name === chainedFieldName)
+									{
+										chainedFieldDef = chainedStructDef[i];
+										break;
+									}
+								}
+								
+								if(!chainedFieldDef)
+								{
+									this.erro("a estrutura intermediária não tem o campo '"+chainedFieldName+"'");
+									return T_vazio;
+								}
+								
+								// Determine target type for chained access
+								targetType = chainedFieldDef.type;
+								if(chainedIsArrayAccess)
+								{
+									if(chainedArrayIndexExprs.length == 1)
+									{
+										targetType = convertArrayToSimpleType(chainedFieldDef.type);
+									}
+									else if(chainedArrayIndexExprs.length == 2)
+									{
+										targetType = convertArrayToSimpleType(convertArrayToSimpleType(chainedFieldDef.type));
+									}
+								}
+								
+								// Load struct
+								bc.push(structVar.global ? B_LOADGLOBAL : B_LOAD);
+								bc.push(structVar.index);
+								
+								// Load the first array field
+								bc.push(B_LIBLOAD);
+								bc.push("__struct__");
+								bc.push(fieldName);
+								
+								// Compile first array index expressions
+								for(let dimIdx = 0; dimIdx < arrayIndexExprs.length; dimIdx++)
+								{
+									this.compileExpr(arrayIndexExprs[dimIdx], bc, T_inteiro);
+								}
+								
+								// Load element from first array (should be a struct)
+								bc.push(B_ALOAD);
+								bc.push(-1);
+								bc.push(arrayIndexExprs.length);
+								
+								// If chained access is also array access
+								if(chainedIsArrayAccess)
+								{
+									// Load the chained array field from the struct on stack
+									bc.push(B_LIBLOAD);
+									bc.push("__struct__");
+									bc.push(chainedFieldName);
+
+									// Compile chained array indices
+									for(let dimIdx = 0; dimIdx < chainedArrayIndexExprs.length; dimIdx++)
+									{
+										this.compileExpr(chainedArrayIndexExprs[dimIdx], bc, T_inteiro);
+									}
+									
+									// Compile the value to assign
+									tExprB = this.compileExpr(expr[1],bc,targetType);
+									this.tryConvertType(targetType,tExprB,bc);
+									
+									if(!checarCompatibilidadeTipo(targetType,tExprB,expr.op))
+									{
+										this.erro("não pode colocar "+getTypeWord(tExprB)+" em uma variável do tipo "+getTypeWord(targetType));
+									}
+									
+									// Store to chained array
+									bc.push(B_ASTORE);
+									bc.push(-1);
+									bc.push(chainedArrayIndexExprs.length);
+									
+									tExprA = targetType;
+									
+									if(typeExpected != T_vazio)
+									{
+										return targetType;
+									}
+									
+									return T_vazio;
+								}
+								else
+								{
+									// Simple field assignment in chained access
+									tExprA = targetType;
+
+									bc.push(B_PUSH);
+									bc.push(chainedFieldName);
+
+									tExprB = this.compileExpr(expr[1],bc,tExprA);
+									this.tryConvertType(tExprA,tExprB,bc);
+
+									if(!checarCompatibilidadeTipo(tExprA,tExprB,expr.op))
+									{
+										this.erro("não pode colocar "+getTypeWord(tExprB)+" em uma variável do tipo "+getTypeWord(tExprA));
+									}
+
+									bc.push(B_LIBINVOKE);
+									bc.push("__struct__");
+									bc.push("__set__");
+									bc.push(3);
+
+									if(typeExpected != T_vazio)
+									{
+										return targetType;
+									}
+
+									return T_vazio;
+								}
+							}
+							else
+							{
+								// For array access (non-chained), determine element type
+								if(arrayIndexExprs.length == 1)
+								{
+									targetType = convertArrayToSimpleType(fieldDef.type);
+								}
+								else if(arrayIndexExprs.length == 2)
+								{
+									targetType = convertArrayToSimpleType(convertArrayToSimpleType(fieldDef.type));
+								}
+								
+								// Load struct
+								bc.push(structVar.global ? B_LOADGLOBAL : B_LOAD);
+								bc.push(structVar.index);
+								
+								// Load the array field
+								bc.push(B_LIBLOAD);
+								bc.push("__struct__");
+								bc.push(fieldName);
+								
+								// Compile array index expressions
+								for(let dimIdx = 0; dimIdx < arrayIndexExprs.length; dimIdx++)
+								{
+									this.compileExpr(arrayIndexExprs[dimIdx], bc, T_inteiro);
+								}
+								
+								// Compile the value to assign
+								tExprB = this.compileExpr(expr[1],bc,targetType);
+								this.tryConvertType(targetType,tExprB,bc);
+								
+								if(!checarCompatibilidadeTipo(targetType,tExprB,expr.op))
+								{
+									this.erro("não pode colocar "+getTypeWord(tExprB)+" em uma variável do tipo "+getTypeWord(targetType));
+								}
+								
+								// Store to array
+								bc.push(B_ASTORE);
+								bc.push(-1); // -1 means use array reference from stack
+								bc.push(arrayIndexExprs.length);
+								
+								tExprA = targetType;
+								
+								if(typeExpected != T_vazio)
+								{
+									// If value is expected, reload it (simplified - just push the assigned value)
+									// In a real implementation, we'd reload from the array
+									return targetType;
+								}
+								
+								return T_vazio;
+							}
+						}
+						else
+						{
+							// Simple field assignment
+							tExprA = targetType;
+						
+							// Load struct, push field name, then compile value
+							bc.push(structVar.global ? B_LOADGLOBAL : B_LOAD);
+							bc.push(structVar.index);
+							bc.push(B_PUSH);
+							bc.push(fieldName);
+						
+							tExprB = this.compileExpr(expr[1],bc,tExprA);
+							this.tryConvertType(tExprA,tExprB,bc);
+						
+							if(!checarCompatibilidadeTipo(tExprA,tExprB,expr.op))
+							{
+								this.erro("não pode colocar "+getTypeWord(tExprB)+" em uma variável do tipo "+getTypeWord(tExprA));
+							}
+						
+							// Use library invoke for field set
+							bc.push(B_LIBINVOKE);
+							bc.push("__struct__");
+							bc.push("__set__");
+							bc.push(3); // 3 args: struct, fieldname, value
+						
+							if(typeExpected != T_vazio)
+							{
+								// If value is expected, load the field again
+								bc.push(structVar.global ? B_LOADGLOBAL : B_LOAD);
+								bc.push(structVar.index);
+								bc.push(B_LIBLOAD);
+								bc.push("__struct__");
+								bc.push(fieldName);
+								return tExprA;
+							}
+						
+							return T_vazio;
+						}
+					}
+				}
+				
 				let v = this.getVar(expr[0].name);
 				if(v.isArray && expr[0].expr)
 				{
@@ -1569,27 +2310,219 @@ export class Compiler {
 							return T_vazio;
 						}
 						
-						// Processa cada variável passada ao leia
-						for(let argIdx = 0; argIdx < args.length; argIdx++)
+					// Processa cada variável passada ao leia
+					for(let argIdx = 0; argIdx < args.length; argIdx++)
+					{
+						let arg = args[argIdx];
+						let argType = T_vazio;
+						
+						// Determine type from AST structure without compiling the expression
+						if(arg.op == T_word)
 						{
-							let methName = "leia";
-							let v = this.getVar(args[argIdx].name);
+							let v = this.getVar(arg.name);
+							argType = v.isArray ? v.arrayType : v.type;
 							
-							if(v.isArray)
-								methName += "$"+getTypeWord(v.arrayType);
-							else
-								methName += "$"+getTypeWord(v.type);
-
-							this.compileExpr(args[argIdx],bc,-1);
+							bc.push(v.global ? B_LOADGLOBAL : B_LOAD);
+							bc.push(v.index);
 							bc.push(B_INVOKE);
-							let funcIndex = this.getFuncIndex(methName,[]);
-							bc.push(funcIndex);
-							bc.push(1); // uma variável por vez
-							
-							this.compileMemberAttrib(args[argIdx],v,bc);
+							bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+							bc.push(0);
+							this.compileMemberAttrib(arg, v, bc);
 						}
-						return T_vazio;
+						else if(arg.op == T_squareO)
+						{
+							let v = this.getVar(arg.name);
+							argType = v.arrayType;
+							
+							// Read value from input first
+							bc.push(B_INVOKE);
+							bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+							bc.push(0);
+							
+							// Store it using compileMemberAttrib (which handles indices)
+							this.compileMemberAttrib(arg, v, bc);
+						}
+						else if(arg.op == T_dot && arg.expr.op == T_squareO && arg.expr.next)
+						{
+							// Chained: struct.field[idx].field2[idx2]
+							let sv = this.scope.getVar(arg.name);
+							let fieldDef = null;
+							if(sv.structDef)
+								for(let i = 0; i < sv.structDef.length; i++)
+									if(sv.structDef[i].name === arg.expr.name)
+									{
+										fieldDef = sv.structDef[i];
+										break;
+									}
+							
+							if(fieldDef)
+							{
+								let chainedStructDef = fieldDef.structDef || null;
+
+								if(!chainedStructDef)
+								{
+									let intermediateType = fieldDef.type;
+
+									if(typeof intermediateType === 'number')
+									{
+										intermediateType = convertArrayToSimpleType(intermediateType);
+									}
+
+									if(intermediateType && intermediateType.id == T_word)
+									{
+										for(let k = 0; k < this.estruturas.length; k++)
+										{
+											if(this.estruturas[k].name === intermediateType.txt)
+											{
+												chainedStructDef = this.estruturas[k].fields;
+												break;
+											}
+										}
+									}
+								}
+
+								if(chainedStructDef)
+								{
+									let chainedFieldName = arg.expr.next.name;
+									let chainedFieldDef = null;
+									for(let i = 0; i < chainedStructDef.length; i++)
+									{
+										if(chainedStructDef[i].name === chainedFieldName)
+										{
+											chainedFieldDef = chainedStructDef[i];
+											break;
+										}
+									}
+
+									if(chainedFieldDef)
+									{
+										argType = chainedFieldDef.type;
+										if(arg.expr.next.op == T_squareO && typeof argType === 'number')
+										{
+											argType = convertArrayToSimpleType(argType);
+										}
+									}
+								}
+							}
+							
+							// Load struct
+							bc.push(sv.global ? B_LOADGLOBAL : B_LOAD);
+							bc.push(sv.index);
+							
+							// Load first field
+							bc.push(B_LIBLOAD);
+							bc.push("__struct__");
+							bc.push(arg.expr.name);
+							
+							// Compile first indices
+							for(let i = 0; i < arg.expr.expr.length; i++)
+								this.compileExpr(arg.expr.expr[i], bc, T_inteiro);
+							
+							// Load element from first array
+							bc.push(B_ALOAD);
+							bc.push(-1);
+							bc.push(arg.expr.expr.length);
+
+							if(arg.expr.next.op == T_squareO)
+							{
+								// Load second field array
+								bc.push(B_LIBLOAD);
+								bc.push("__struct__");
+								bc.push(arg.expr.next.name);
+
+								// Compile second indices
+								for(let i = 0; i < arg.expr.next.expr.length; i++)
+									this.compileExpr(arg.expr.next.expr[i], bc, T_inteiro);
+
+								// Read value from input
+								bc.push(B_INVOKE);
+								bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+								bc.push(0);
+
+								// Store value to second array
+								bc.push(B_ASTORE);
+								bc.push(-1);
+								bc.push(arg.expr.next.expr.length);
+							}
+							else
+							{
+								// Store directly in chained simple field
+								bc.push(B_PUSH);
+								bc.push(arg.expr.next.name);
+								bc.push(B_INVOKE);
+								bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+								bc.push(0);
+								bc.push(B_LIBINVOKE);
+								bc.push("__struct__");
+								bc.push("__set__");
+								bc.push(3);
+							}
+						}
+						else if(arg.op == T_dot && arg.expr.op == T_squareO)
+						{
+							// Simple array field: struct.field[idx]
+							let sv = this.scope.getVar(arg.name);
+							let fieldDef = null;
+							if(sv.structDef)
+								for(let i = 0; i < sv.structDef.length; i++)
+									if(sv.structDef[i].name === arg.expr.name)
+									{
+										fieldDef = sv.structDef[i];
+										break;
+									}
+							
+							if(fieldDef && typeof fieldDef.type === 'number')
+								argType = convertArrayToSimpleType(fieldDef.type);
+							else
+								argType = fieldDef ? fieldDef.type : T_vazio;
+							
+							bc.push(sv.global ? B_LOADGLOBAL : B_LOAD);
+							bc.push(sv.index);
+							bc.push(B_LIBLOAD);
+							bc.push("__struct__");
+							bc.push(arg.expr.name);
+							
+							for(let i = 0; i < arg.expr.expr.length; i++)
+								this.compileExpr(arg.expr.expr[i], bc, T_inteiro);
+							
+							bc.push(B_INVOKE);
+							bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+							bc.push(0);
+							
+							bc.push(B_ASTORE);
+							bc.push(-1);
+							bc.push(arg.expr.expr.length);
+						}
+						else if(arg.op == T_dot)
+						{
+							// Simple struct field: struct.field
+							let sv = this.scope.getVar(arg.name);
+							let fieldDef = null;
+							if(sv.structDef)
+								for(let i = 0; i < sv.structDef.length; i++)
+									if(sv.structDef[i].name === arg.expr.name)
+									{
+										fieldDef = sv.structDef[i];
+										break;
+									}
+							
+							argType = fieldDef ? fieldDef.type : T_vazio;
+							
+							bc.push(sv.global ? B_LOADGLOBAL : B_LOAD);
+							bc.push(sv.index);
+							bc.push(B_PUSH);
+							bc.push(arg.expr.name);
+							bc.push(B_INVOKE);
+							bc.push(this.getFuncIndex("leia$"+getTypeWord(argType), []));
+							bc.push(0);
+							bc.push(B_LIBINVOKE);
+							bc.push("__struct__");
+							bc.push("__set__");
+							bc.push(3);
+						}
 					}
+				return T_vazio;
+			}
 					else
 					{
 						let methName= expr.name;
@@ -1600,7 +2533,7 @@ export class Compiler {
 							funcArgs.push(this.compileExpr(args[i],bc,-1));
 							/*if(func.parameters[i].byRef)
 							{
-								let refFake_v = this.createVar(methName+"$"+i+"$"+bc.length,func.parameters[i].type,false,true,1);
+								let refFake_v = this.createVar(methName+"$"+i+"$"+bc.length,func.parameters[i].type,false,true,1,undefined,undefined);
 								refVars[i] = {fakeV:refFake_v,realV:args[i]};
 								// criando array de 1 dimensão
 								bc.push(B_NEWARRAY);
@@ -1690,6 +2623,101 @@ export class Compiler {
 				}
 				case T_dot:
 				{
+					// Check if it's a struct variable access first
+					let v = this.scope.getVar(expr.name);
+					if(v && v.structType)
+					{
+						const findStructDefByType = (typeInfo) => {
+							if(typeInfo && typeInfo.id == T_word)
+							{
+								for(let k = 0; k < this.estruturas.length; k++)
+								{
+									if(this.estruturas[k].name === typeInfo.txt)
+									{
+										return this.estruturas[k].fields;
+									}
+								}
+							}
+							return null;
+						};
+
+						const findFieldDef = (structDef, fieldName) => {
+							if(!structDef) return null;
+							for(let f = 0; f < structDef.length; f++)
+							{
+								if(structDef[f].name === fieldName)
+								{
+									return structDef[f];
+								}
+							}
+							return null;
+						};
+
+						bc.push(v.global ? B_LOADGLOBAL : B_LOAD);
+						bc.push(v.index);
+
+						let currentStructDef = v.structDef;
+						let currentType = v.type;
+						let accessNode = expr.expr;
+
+						while(accessNode)
+						{
+							if(accessNode.op != T_word && accessNode.op != T_squareO)
+							{
+								this.erro("acesso inválido ao membro da estrutura");
+								return T_vazio;
+							}
+
+							let fieldName = accessNode.name;
+							let fieldDef = findFieldDef(currentStructDef, fieldName);
+							if(!fieldDef)
+							{
+								this.erro("a estrutura não tem o campo '"+fieldName+"'");
+								return T_vazio;
+							}
+
+							bc.push(B_LIBLOAD);
+							bc.push("__struct__");
+							bc.push(fieldName);
+
+							currentType = fieldDef.type;
+
+							if(accessNode.op == T_squareO)
+							{
+								for(let dimIdx = 0; dimIdx < accessNode.expr.length; dimIdx++)
+								{
+									this.compileExpr(accessNode.expr[dimIdx], bc, T_inteiro);
+								}
+
+								bc.push(B_ALOAD);
+								bc.push(-1);
+								bc.push(accessNode.expr.length);
+
+								if(typeof currentType === 'number')
+								{
+									for(let d = 0; d < accessNode.expr.length; d++)
+									{
+										currentType = convertArrayToSimpleType(currentType);
+									}
+								}
+							}
+
+							if(accessNode.next)
+							{
+								currentStructDef = findStructDefByType(currentType);
+								if(!currentStructDef)
+								{
+									this.erro("tipo intermediário não é uma estrutura válida para acesso encadeado");
+									return T_vazio;
+								}
+							}
+
+							accessNode = accessNode.next;
+						}
+
+						return currentType;
+					}
+					
 					let biblioteca = expr.name;
 					let campo = expr.expr;
 					

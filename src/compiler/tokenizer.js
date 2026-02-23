@@ -80,7 +80,7 @@ export function removeEscaping(tok,str,escaping)
 export const separators = "\n\t +-*/%><!=&|^~;,.{}()[]:\r";
 export const reserved_words =
 [
-"programa","funcao","inclua","biblioteca","e","ou","nao","se","senao","enquanto","faca","para","escolha","caso","contrario","pare","retorne","vazio","const"
+"programa","funcao","inclua","biblioteca","e","ou","nao","se","senao","enquanto","faca","para","escolha","caso","contrario","pare","retorne","vazio","const","estrutura"
 ];
 export const type_words =
 [
@@ -399,6 +399,7 @@ export const T_pare = 79;
 export const T_retorne = 80;
 export const T_vazio = 81;
 export const T_const = 82;
+export const T_estrutura = 83;
 //var TYPE_WORD = 4;
 const T_TYPEOFF = 96;
 export function getTypeWordCode(c)
@@ -494,7 +495,14 @@ export function getTypeWord(code)
 		case T_Mcadeia: return "cadeia[][]";
 		case T_Mreal: return "real[][]";
 		case T_Mlogico: return "logico[][]";
-		default: return code;
+		
+		// Handle struct types (token objects)
+		default:
+			if(typeof code === 'object' && code !== null && code.txt)
+			{
+				return code.txt; // Return struct type name
+			}
+			return code;
 	}
 }
 
@@ -807,6 +815,23 @@ export class Tokenizer {
 					else
 					{
 						this.tokens.push({id:getReservedWordCode(word),index:palavraIndex,txt:word});
+					}
+				}
+				else if(word == "texto")
+				{
+					let next = i+1;
+					while(next < this.input.length && /\s/.test(this.input.charAt(next)))
+					{
+						next++;
+					}
+
+					if(next < this.input.length && /^[a-zA-Z_\$]$/.test(this.input.charAt(next)))
+					{
+						this.tokens.push({id:T_cadeia,index:palavraIndex,txt:word});
+					}
+					else
+					{
+						this.tokens.push({id:T_word,index:palavraIndex,txt:word});
 					}
 				}
 				else if( type_words.indexOf(word) > -1) // tipo

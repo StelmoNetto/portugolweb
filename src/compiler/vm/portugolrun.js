@@ -14,7 +14,7 @@ import Teclado from "./libraries/Teclado.js";
 import Texto from "./libraries/Texto.js";
 import Tipos from "./libraries/Tipos.js";
 import Util from "./libraries/Util.js";
-import { escreva, getCurrentTokenIndex, getScopeFromTokenIndex, STATE_ASYNC_RETURN, STATE_BREATHING, STATE_DELAY, STATE_DELAY_REPEAT, STATE_ENDED, STATE_PENDINGSTOP, STATE_RUNNING, STATE_STEP, STATE_WAITINGINPUT, VMgetGlobalVar, VMgetVar, VMrun, VMsetup, VMtoString, VM_async_return, VM_b2s, VM_f2s, VM_getCodeMax, VM_getDelay, VM_getExecJS, VM_i2s 
+import { escreva, getCurrentTokenIndex, getScopeFromTokenIndex, STATE_ASYNC_RETURN, STATE_BREATHING, STATE_DELAY, STATE_DELAY_REPEAT, STATE_ENDED, STATE_PAUSED_AT_BREAKPOINT, STATE_PENDINGSTOP, STATE_RUNNING, STATE_STEP, STATE_WAITINGINPUT, VMgetGlobalVar, VMgetVar, VMrun, VMsetup, VMtoString, VM_async_return, VM_b2s, VM_f2s, VM_getCodeMax, VM_getDelay, VM_getExecJS, VM_i2s 
 } from "./vm.js";
 import { checkIsMobile } from "../../extras/mobile.js";
 
@@ -66,6 +66,14 @@ function _doExec(that,resolve)
 		// não faz nada quando é o passo-a-passo, vai esperar clicar denovo no botão
 		return;
 	}
+	else if(state == STATE_PAUSED_AT_BREAKPOINT)
+	{
+		if(typeof that.onBreakpointPause === 'function')
+		{
+			that.onBreakpointPause();
+		}
+		return;
+	}
 	else if(state == STATE_BREATHING)
 	{
 		mySetTimeout("EXEC",that.promisefn,0);
@@ -104,14 +112,7 @@ export default class PortugolRuntime {
 			
 			that.errosCount++;
 			if(that.escrever_erros) {
-				try {
-					let obj = {};
-					console.log(obj.erro.erromesmo);
-				} catch (e) {
-					let myStackTrace = e.stack || e.stacktrace || "";
-					
-					console.log(myStackTrace);
-				}
+				console.log(msg);
 			}
 			
 			// manter no formato de erro esperado pelo Ace Editor
@@ -164,7 +165,7 @@ export default class PortugolRuntime {
 	}
 
 	executar_step() {
-		if(this.lastvmStep && this.lastvmState == STATE_STEP)
+		if(this.lastvmStep && (this.lastvmState == STATE_STEP || this.lastvmState == STATE_PAUSED_AT_BREAKPOINT))
 		{
 			this.promisefn();
 		}
@@ -223,9 +224,9 @@ export default class PortugolRuntime {
 
 	parar()
 	{
-		if(this.lastvmState == STATE_RUNNING || this.lastvmState == STATE_WAITINGINPUT || this.lastvmState == STATE_BREATHING || this.lastvmState == STATE_DELAY || this.lastvmState == STATE_DELAY_REPEAT || this.lastvmState == STATE_STEP || this.lastvmState == STATE_ASYNC_RETURN)
+		if(this.lastvmState == STATE_RUNNING || this.lastvmState == STATE_WAITINGINPUT || this.lastvmState == STATE_BREATHING || this.lastvmState == STATE_DELAY || this.lastvmState == STATE_DELAY_REPEAT || this.lastvmState == STATE_STEP || this.lastvmState == STATE_ASYNC_RETURN || this.lastvmState == STATE_PAUSED_AT_BREAKPOINT)
 		{
-			if(this.lastvmState == STATE_WAITINGINPUT || this.lastvmState == STATE_STEP || this.lastvmState == STATE_ASYNC_RETURN || this.lastvmState == STATE_DELAY || this.lastvmState == STATE_DELAY_REPEAT)
+			if(this.lastvmState == STATE_WAITINGINPUT || this.lastvmState == STATE_STEP || this.lastvmState == STATE_ASYNC_RETURN || this.lastvmState == STATE_DELAY || this.lastvmState == STATE_DELAY_REPEAT || this.lastvmState == STATE_PAUSED_AT_BREAKPOINT)
 			{
 				if(this.lastvmState == STATE_STEP)
 				{
