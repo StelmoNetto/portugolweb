@@ -357,6 +357,11 @@ h1 {
 	margin-left: 40px;
 }
 
+.ace_gutter-cell.ace_breakpoint {
+	background-color: #FF4444 !important;
+	border-radius: 2px;
+}
+
 /* Dark theme variant for output */
 div.saida.dark-theme {
 	color: #C0C0C0;

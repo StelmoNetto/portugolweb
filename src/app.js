@@ -1,9 +1,9 @@
 import { checkIsMobile } from "./extras/mobile.js";
 
-import { getCurrentTokenIndex, STATE_ASYNC_RETURN, STATE_ENDED, STATE_STEP, STATE_WAITINGINPUT, VM_getExecJS, VM_getSaida, VM_setExecJS, VM_valueToString 
+import { getCurrentTokenIndex, STATE_ASYNC_RETURN, STATE_ENDED, STATE_PAUSED_AT_BREAKPOINT, STATE_STEP, STATE_WAITINGINPUT, VM_getExecJS, VM_getSaida, VM_setBreakpoints, VM_setExecJS, VM_valueToString 
 } from "./compiler/vm/vm.js";
 import { httpGetAsync, numberOfLinesUntil, cursorToEnd as _cursorToEnd } from "./extras/extras.js";
-import { htmlEntities } from "./compiler/tokenizer.js";
+import { convertArrayType, convertMatrixType, htmlEntities } from "./compiler/tokenizer.js";
 import { myClearTimeout } from "./extras/timeout.js";
 import { persistentGetValue, persistentStoreValue } from "./extras/persistent.js";
 import PortugolRuntime from "./compiler/vm/portugolrun.js";
@@ -34,10 +34,90 @@ import Hotbar from "./pages/index/hotbar.js";
 	const hotbarManager = new Hotbar(hotbar,div_saida,errosSaida,div_tabelavariaveis,isMobile,(sz) => {
 		editorManager.resizeEditor(sz);
 	});
+
+	const breakpoints = new Set();
+	let breakpointMarkers = [];
 	
 	//####################################################
 	//################# UI ###############################
 	//####################################################
+	function getDisplayType(field)
+	{
+		if(!field) return undefined;
+		if(field.isArray)
+		{
+			if(field.arrayDim == 1) return convertArrayType(field.type);
+			if(field.arrayDim == 2) return convertMatrixType(field.type);
+		}
+		return field.type;
+	}
+
+	function buildStructPrimitiveRows(rows, baseName, value, structDef)
+	{
+		if(!structDef || !value || typeof value !== "object") return;
+
+		for(const field of structDef)
+		{
+			const fieldPath = baseName + "." + field.name;
+			const fieldValue = value[field.name];
+			const isStructField = !!field.structType || (field.type && typeof field.type === "object" && field.type.txt);
+
+			if(isStructField)
+			{
+				if(field.isArray)
+				{
+					const walkStructArray = (arr, dim, idxPath) => {
+						if(dim <= 0)
+						{
+							buildStructPrimitiveRows(rows, fieldPath + idxPath, arr, field.structDef);
+							return;
+						}
+						if(!Array.isArray(arr)) return;
+						for(let i = 0; i < arr.length; i++)
+						{
+							walkStructArray(arr[i], dim-1, idxPath + "["+i+"]");
+						}
+					};
+
+					walkStructArray(fieldValue, field.arrayDim || 1, "");
+				}
+				else
+				{
+					buildStructPrimitiveRows(rows, fieldPath, fieldValue, field.structDef);
+				}
+				continue;
+			}
+
+			rows.push({
+				name: fieldPath,
+				type: getDisplayType(field),
+				value: fieldValue
+			});
+		}
+	}
+
+	function toggleBreakpoint(lineNumber) {
+		if(breakpoints.has(lineNumber)) {
+			breakpoints.delete(lineNumber);
+		} else {
+			breakpoints.add(lineNumber);
+		}
+		updateBreakpointMarkers();
+	}
+
+	function updateBreakpointMarkers() {
+		const session = editorManager.editor.session;
+		for(const lineNum of breakpointMarkers) {
+			session.removeGutterDecoration(lineNum - 1, 'ace_breakpoint');
+		}
+		breakpointMarkers = [];
+
+		for(const lineNum of breakpoints) {
+			session.addGutterDecoration(lineNum - 1, 'ace_breakpoint');
+			breakpointMarkers.push(lineNum);
+		}
+	}
+
 	function gerarTabelaVariaveis() {
 		const tabela = portugolRun.getCurrentDeclaredVariables();
 
@@ -50,17 +130,45 @@ import Hotbar from "./pages/index/hotbar.js";
 
 		let txt = isDark ? "<div class='atecemporcento'><table class='tabelavariaveis dark-theme'><thead><tr><th>Variaveis</th></tr></thead><tbody>" : "<div class='atecemporcento'><table class='tabelavariaveis'><thead><tr><th>Variaveis</th></tr></thead><tbody>";
 		for(const v of tabela) {
-			let vtxt = "";
+			const rows = [v];
+			if(v.structType && v.structDef)
+			{
+				if(v.isArray)
+				{
+					const walkRootStructArray = (arr, dim, idxPath) => {
+						if(dim <= 0)
+						{
+							buildStructPrimitiveRows(rows, v.name + idxPath, arr, v.structDef);
+							return;
+						}
+						if(!Array.isArray(arr)) return;
+						for(let i = 0; i < arr.length; i++)
+						{
+							walkRootStructArray(arr[i], dim-1, idxPath + "["+i+"]");
+						}
+					};
 
-			if (v.value === undefined || v.value === null) 
-			vtxt = "";
-			else vtxt = VM_valueToString(v.type,v.value);
-			
-
-			if(vtxt.length > 1000) {
-				vtxt = vtxt.substring(0,1000) + "...";
+					walkRootStructArray(v.value, v.arrayDim || 1, "");
+				}
+				else
+				{
+					buildStructPrimitiveRows(rows, v.name, v.value, v.structDef);
+				}
 			}
-			txt += "<tr><td>"+v.name+":&emsp;"+vtxt+"</td></tr>";
+
+			for(const row of rows)
+			{
+				let vtxt = "";
+
+				if (row.value === undefined || row.value === null) 
+				vtxt = "";
+				else vtxt = VM_valueToString(row.type,row.value);
+
+				if(vtxt.length > 1000) {
+					vtxt = vtxt.substring(0,1000) + "...";
+				}
+				txt += "<tr><td>"+row.name+":&emsp;"+vtxt+"</td></tr>";
+			}
 		}
 		txt += "</tbody></table></div>";
 
@@ -72,15 +180,61 @@ import Hotbar from "./pages/index/hotbar.js";
 		div_tabelavariaveis.style.display = "none";
 	}
 
+	function updateButtonLabels() {
+		const runBtn = document.getElementById("btn-run");
+		if(!runBtn) return;
+
+		if(portugolRun.lastvmState == STATE_ENDED) {
+			runBtn.value = "Executar";
+		} else if(portugolRun.lastvmState == STATE_PAUSED_AT_BREAKPOINT || portugolRun.lastvmState == STATE_STEP) {
+			runBtn.value = "Continuar";
+		} else {
+			runBtn.value = "Parar";
+		}
+	}
+
+	function updateStopButton(enabled) {
+		const stopBtn = document.getElementById("btn-stop");
+		if(stopBtn) {
+			stopBtn.disabled = !enabled;
+		}
+	}
+
+	function highlightBreakpointLine() {
+		try {
+			realcarLinha(editorManager.getValue(), getCurrentTokenIndex(), true);
+			gerarTabelaVariaveis();
+			updateButtonLabels();
+		} catch(e) {
+			console.error("Erro ao realçar linha de breakpoint:", e);
+		}
+	}
+
+	portugolRun.onBreakpointPause = highlightBreakpointLine;
+
 	export function executar(btn,passoapasso)
 	{
-		if(passoapasso && portugolRun.lastvmState == STATE_STEP)
+		if(portugolRun.lastvmState == STATE_STEP || portugolRun.lastvmState == STATE_PAUSED_AT_BREAKPOINT)
 		{
+			if(!passoapasso)
+			{
+				hotbarManager.extendUntil("EXTENDED");
+				limparErros();
+				portugolRun.lastvmStep = false;
+				updateStopButton(true);
+				if(portugolRun.promisefn)
+				{
+					portugolRun.promisefn();
+				}
+				return;
+			}
+
 			// abrir hotbar e animar
 			hotbarManager.extendUntil("EXTENDED");
 
 			// Limpa erros anteriores
 			limparErros();
+			portugolRun.lastvmStep = true;
 			
 			// Usa requestAnimationFrame para sincronizar realce com rendering
 			// Evita race condition que causava não realçar a linha em Opera/IE
@@ -90,7 +244,9 @@ import Hotbar from "./pages/index/hotbar.js";
 				portugolRun.executar_step();
 				
 				gerarTabelaVariaveis();
+				updateButtonLabels();
 			});
+			updateStopButton(true);
 
 			return;
 		} else {
@@ -118,24 +274,29 @@ import Hotbar from "./pages/index/hotbar.js";
 				editorManager.updateAutoComplete(compilado);
 				if(!compilado.success) {
 					console.log(portugolRun.errosCount+" Erros na compilação:");
+					updateStopButton(false);
 					return;
 				}
-				
-				btn.value = "Parar";
+
+				VM_setBreakpoints(breakpoints);
+				updateStopButton(true);
+				updateButtonLabels();
+
 				portugolRun.executar(string_cod,compilado,enviarErro,passoapasso)
 				.then((output) => {
 
 					if(passoapasso)
 					limparErros(["information"]); // Limpa o último realce de linha (por algum motivo não funciona no leia quando é pulado)
-
-					btn.value = "Executar";
+					updateStopButton(false);
+					updateButtonLabels();
 				})
 				.catch((err) => {
 					let myStackTrace = err.stack || err.stacktrace || "";
 
 					console.log(myStackTrace);
 
-					btn.value = "Executar";
+					updateStopButton(false);
+					updateButtonLabels();
 				});
 			}
 			catch(e)
@@ -154,22 +315,34 @@ import Hotbar from "./pages/index/hotbar.js";
 					type: "error", // also warning and information
 					myErrorType: "compilador"
 				});
-
-				btn.value = "Executar";
+				updateStopButton(false);
+				updateButtonLabels();
 				return;
 			}
 		}
 		else
 		{
-			if(btn.value != "Parar" && btn.value != "Parando...")
+			if(btn.value != "Parar" && btn.value != "Continuar")
 			{
-				console.error("Botão em estado inconsistente(Deveria ser 'Parar' ou 'Parando...'):"+btn.value);
+				console.error("Botão em estado inconsistente(Deveria ser 'Parar' ou 'Continuar'):"+btn.value);
 			}
-			btn.value == "Parando...";
 
 			if(portugolRun.parar())
 			{
-				btn.value = "Executar";
+				updateStopButton(false);
+				updateButtonLabels();
+			}
+		}
+	}
+
+	export function pararExecucao() {
+		if(portugolRun.lastvmState != STATE_ENDED)
+		{
+			const parou = portugolRun.parar();
+			if(parou)
+			{
+				updateStopButton(false);
+				updateButtonLabels();
 			}
 		}
 	}
@@ -782,6 +955,32 @@ import Hotbar from "./pages/index/hotbar.js";
 		else
 		{
 			hotbarManager.collapseUntil("EXTENDED");
+		}
+	});
+
+	editorManager.editor.on('guttermousedown', (e) => {
+		let row = e.row;
+		if (row === undefined || row === null || isNaN(row)) {
+			const target = e.domEvent?.target || e.target;
+			if (target) {
+				const gutterRow = target.closest('.ace_gutter-cell');
+				if (gutterRow) {
+					const rowText = gutterRow.textContent || gutterRow.innerText;
+					row = parseInt(rowText) - 1;
+				}
+			}
+		}
+
+		const target = e.domEvent?.target || e.target;
+		const isGutterClick = target && (
+			target.classList?.contains('ace_gutter-cell') ||
+			target.closest('.ace_gutter-cell') !== null
+		);
+
+		if(isGutterClick && row >= 0 && !isNaN(row)) {
+			toggleBreakpoint(row + 1);
+			updateBreakpointMarkers();
+			e.preventDefault();
 		}
 	});
 
