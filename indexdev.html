@@ -126,6 +126,11 @@ onclick="index.executarStepStart(this)"
 title="Executa o código mostando linha a linha a cada clique"
 />
 
+<input tabindex="-1" id="btn-stop" type="button" value="Parar" 
+onclick="index.pararExecucao()" 
+title="Para a execução do código" disabled="disabled"
+/>
+
 <input tabindex="-1" type="button" style="background-image: url(icons/FontPlus.png); cursor: zoom-in;" id="btn-fonteMaior" value=" " onclick="index.fonteAumentar()" onfocus="index.preventFocus(event)" title="Aumenta o tamanho da fonte"/>
 <input tabindex="-1" type="button" style="background-image: url(icons/FontMinus.png); cursor: zoom-out;" id="btn-fonteMenor" value=" " onclick="index.fonteDiminuir()" onfocus="index.preventFocus(event)" title="Diminui o tamanho da fonte"/>
 <input type="button" style="background-image: url(icons/save.png);" id="btn-salvar" value=" " onclick="index.save()" title="Baixa o código"/>
